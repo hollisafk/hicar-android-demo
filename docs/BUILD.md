@@ -26,7 +26,7 @@ python3 native-auth/build-android.py
 bash app/build.sh
 ```
 
-默认在 `.local-signing/` 生成仅供本地开发的密钥，产物为 `app/build/HiCarLab-0.11.0-development.apk`。这个密钥不能用于官方持续更新，也不能覆盖使用不同证书签名的旧安装。
+默认在 `.local-signing/` 生成仅供本地开发的密钥，产物为 `app/build/HiCarLab-0.11.1-development.apk`。这个密钥不能用于官方持续更新，也不能覆盖使用不同证书签名的旧安装。
 
 正式版本使用独立保存的发布密钥：
 

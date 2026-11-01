@@ -35,7 +35,7 @@ public final class HomeActivity extends ThemeActivity {
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(24),dp(36),dp(24),dp(24));root.setBackgroundColor(UiTheme.background(this));scroll.addView(root);
         TextView title=new TextView(this);title.setText("HiCar 接收端");title.setTextSize(30);title.setTextColor(UiTheme.text(this));root.addView(title);
-        TextView version=new TextView(this);version.setText("实验版 0.11.0");version.setTextSize(14);version.setPadding(0,dp(8),0,dp(32));root.addView(version);
+        TextView version=new TextView(this);version.setText("实验版 0.11.1");version.setTextSize(14);version.setPadding(0,dp(8),0,dp(32));root.addView(version);
         status=new TextView(this);status.setTextSize(24);status.setTextColor(UiTheme.accent(this));status.setPadding(dp(18),dp(24),dp(18),dp(24));status.setBackgroundColor(UiTheme.card(this));root.addView(status);
         detail=new TextView(this);detail.setTextSize(15);detail.setPadding(dp(18),dp(12),dp(18),dp(12));root.addView(detail);
         TextView help=new TextView(this);help.setText("开启华为手机的蓝牙和 WLAN，点击下方开始连接。首次连接按手机提示输入接收画面中的六位码。\n\n接收时可锁屏或切换应用；结束时请点停止连接。");help.setTextSize(16);help.setPadding(0,dp(24),0,dp(20));root.addView(help);

@@ -70,7 +70,7 @@ public class MainActivity extends ThemeActivity {
         int pad = (int)(16 * getResources().getDisplayMetrics().density);
         root.setPadding(pad, pad, pad, pad);
         scroll.addView(root);
-        TextView title = new TextView(this); title.setText("设置与诊断 · 0.11.0"); title.setTextSize(25); root.addView(title);
+        TextView title = new TextView(this); title.setText("设置与诊断 · 0.11.1"); title.setTextSize(25); root.addView(title);
         TextView note = new TextView(this);
         note.setText("设置与诊断\n日常连接请使用首页。下方提供接收设置、权限检查和连接诊断。\n下方保留分阶段测试，进行实验前请先停止当前连接。请停车后操作。");
         note.setTextSize(16); root.addView(note);
@@ -344,7 +344,7 @@ public class MainActivity extends ThemeActivity {
         if (request == EXPORT && result == RESULT_OK && data != null && data.getData() != null) {
             try (OutputStream out = getContentResolver().openOutputStream(data.getData())) {
                 if (out == null) throw new IOException("No output stream");
-                String report = "HiCarLab 0.11.0\nAuthentication/network: EXPERIMENTAL; video/input/audio: EXPERIMENTAL\n" + snapshot + "\n事件日志\n" + DiagnosticLog.history(getApplicationContext());
+                String report = "HiCarLab 0.11.1\nAuthentication/network: EXPERIMENTAL; video/input/audio: EXPERIMENTAL\n" + snapshot + "\n事件日志\n" + DiagnosticLog.history(getApplicationContext());
                 out.write(report.getBytes(StandardCharsets.UTF_8)); log("报告已导出。");
             } catch (IOException | RuntimeException e) { log("导出失败：" + e.getClass().getSimpleName()); }
         }

@@ -1,4 +1,5 @@
-DiscoveryBeacon.java: FDEE layout adapted from Aki894/CarLink, experiments/hicar/probe.py
+Protocol references and adaptations: FDEE discovery, Nearby framing, HiChain integration, DMSDP, HiSight, UIBC and audio transport adapted from Aki894/CarLink. See source comments and dependency lock.
+DiscoveryBeacon.java: FDEE layout adapted from experiments/hicar/probe.py
 Commit 6210b2fcfdcaa7da334683f09b15d51369eef440
 https://github.com/Aki894/CarLink
 
@@ -25,7 +26,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-HiCarLab 0.3 native authentication:
-OpenHarmony DeviceAuth commit 552edb521d0bd7c17f2dab2791e7cdc3de284405; HUKS commit 89f0842ef2600a0d9b5351ef11e1f8acab8ff439; securec commit ebef58f44419d0694e984d25acac231e737d60ff. Licenses: Apache-2.0 or source file specific, see packaged license files and matching source.
-Mbed TLS 2.28.9; OpenSSL 3.5.4; cJSON 1.7.19. See assets/licenses for upstream licenses.
+Native authentication and static dependencies:
+OpenHarmony DeviceAuth commit 552edb521d0bd7c17f2dab2791e7cdc3de284405; HUKS commit 89f0842ef2600a0d9b5351ef11e1f8acab8ff439; securec commit ebef58f44419d0694e984d25acac231e737d60ff. DeviceAuth and HUKS: Apache-2.0 (retain source-specific notices). securec: MulanPSL-2.0. See packaged licenses and matching source.
+Mbed TLS 2.28.9: distributed under its Apache-2.0 option. OpenSSL 3.5.4: Apache-2.0. cJSON 1.7.19: MIT. Full upstream license texts are in app/assets/licenses (assets/licenses inside the APK).
 Changes: Android JNI adapter, private HUKS storage, Java framing/control/auth stream implementation, Android build integration. Protocol adaptation from CarLink (MIT). No Huawei proprietary APK or extracted system code is included.

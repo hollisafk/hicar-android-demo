@@ -27,9 +27,12 @@ for abi, target in [('arm64-v8a', 'android-arm64'), ('armeabi-v7a', 'android-arm
     jobs = os.environ.get('HICAR_BUILD_JOBS', '4')
     def run(command, cwd=None):
         subprocess.run([str(x) for x in command], cwd=cwd, env=env, check=True)
-    run([root / 'deps/openssl/Configure', target, 'no-shared', 'no-tests', 'no-apps', '-D__ANDROID_API__=26', '--prefix=' + str(prefix)], openssl)
+    # Keep compiled OpenSSL default directories independent of the workstation.
+    staging = out / 'openssl-install'
+    run([root / 'deps/openssl/Configure', target, 'no-shared', 'no-tests', 'no-apps', '-D__ANDROID_API__=26', '--prefix=/opt/hicar', '--openssldir=/opt/hicar/ssl', '--libdir=lib'], openssl)
     run(['make', '-j' + jobs], openssl)
-    run(['make', 'install_sw'], openssl)
+    run(['make', 'install_sw', 'DESTDIR=' + str(staging)], openssl)
+    shutil.copytree(staging / 'opt/hicar', prefix, dirs_exist_ok=True)
     common = ['-DCMAKE_TOOLCHAIN_FILE=' + str(ndk / 'build/cmake/android.toolchain.cmake'), '-DANDROID_ABI=' + abi,
               '-DANDROID_PLATFORM=android-26', '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_POSITION_INDEPENDENT_CODE=ON',
               '-DCMAKE_POLICY_VERSION_MINIMUM=3.5', '-DCMAKE_C_FLAGS=' + path_flag, '-DCMAKE_INSTALL_PREFIX=' + str(prefix)]
