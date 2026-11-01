@@ -1,0 +1,33 @@
+{
+  "deviceauth": {
+    "repository": "https://github.com/openharmony/security_deviceauth.git",
+    "commit": "552edb521d0bd7c17f2dab2791e7cdc3de284405"
+  },
+  "huks": {
+    "repository": "https://github.com/openharmony/security_huks.git",
+    "commit": "89f0842ef2600a0d9b5351ef11e1f8acab8ff439"
+  },
+  "securec": {
+    "repository": "https://github.com/openharmony/third_party_bounds_checking_function.git",
+    "commit": "ebef58f44419d0694e984d25acac231e737d60ff"
+  },
+  "CarLink": {
+    "repository": "https://github.com/Aki894/CarLink",
+    "commit": "6210b2fcfdcaa7da334683f09b15d51369eef440"
+  },
+  "mbedtls": {
+    "tag": "v2.28.9",
+    "archive_sha256": "e4dbcf86a4fb31506482888560f02b161e0ecfb82fee0643abcfc86abee5817e",
+    "repository": "https://github.com/Mbed-TLS/mbedtls"
+  },
+  "openssl": {
+    "tag": "openssl-3.5.4",
+    "archive_sha256": "758b69feed5787dc12d34b0eb29b60d3c9d73d5a64760c62d93a6d26b344d65d",
+    "repository": "https://github.com/openssl/openssl"
+  },
+  "cjson": {
+    "tag": "v1.7.19",
+    "archive_sha256": "7fa616e3046edfa7a28a32d5f9eacfd23f92900fe1f8ccd988c1662f30454562",
+    "repository": "https://github.com/DaveGamble/cJSON"
+  }
+}

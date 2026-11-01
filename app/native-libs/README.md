@@ -1,0 +1,1 @@
+Native libraries are generated locally. Run native-auth/fetch-deps.py and native-auth/build-android.py from the repository root. The lib/ directory is intentionally ignored by Git. See docs/BUILD.md and THIRD_PARTY_NOTICES.txt.

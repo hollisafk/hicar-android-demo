@@ -1,0 +1,31 @@
+DiscoveryBeacon.java: FDEE layout adapted from Aki894/CarLink, experiments/hicar/probe.py
+Commit 6210b2fcfdcaa7da334683f09b15d51369eef440
+https://github.com/Aki894/CarLink
+
+MIT License
+
+Copyright (c) 2026 CarLink contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+HiCarLab 0.3 native authentication:
+OpenHarmony DeviceAuth commit 552edb521d0bd7c17f2dab2791e7cdc3de284405; HUKS commit 89f0842ef2600a0d9b5351ef11e1f8acab8ff439; securec commit ebef58f44419d0694e984d25acac231e737d60ff. Licenses: Apache-2.0 or source file specific, see packaged license files and matching source.
+Mbed TLS 2.28.9; OpenSSL 3.5.4; cJSON 1.7.19. See assets/licenses for upstream licenses.
+Changes: Android JNI adapter, private HUKS storage, Java framing/control/auth stream implementation, Android build integration. Protocol adaptation from CarLink (MIT). No Huawei proprietary APK or extracted system code is included.
