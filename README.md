@@ -17,8 +17,7 @@
 1. 打开本仓库的 [Releases](https://github.com/hollisafk/hicar-android-demo/releases)。
 2. 选择最新 APK，例如 `HiCarLab-0.11.1.apk`。
 3. 下载后安装到目标车机。
-4. 重要说明：包名为 `local.hicarlab`，与旧版 `com.hsy.hicar` 不同，属于并存安装而非覆盖升级。
-5. 若需要自行构建，请参阅 `docs/BUILD.md`，并遵循 `native-auth/` 的本地编译说明。
+4. 若需要自行构建，请参阅 `docs/BUILD.md`，并遵循 `native-auth/` 的本地编译说明。
 
 ## 兼容性状态说明
 
@@ -39,8 +38,6 @@
 - 上游：[huducat586/hicar-android-receiver](https://github.com/huducat586/hicar-android-receiver)，基线提交 `a93b36f`（tag `v0.11.1-preview`）。
 - 本仓库保留上游 git 历史；应用层源码与适配代码按 MIT 许可证发布。
 - 第三方源码与静态链接依赖保留各自许可证，详见仓库内 `THIRD_PARTY_NOTICES.txt`。
-- 上游的型号 `00048000`、包名 `local.hicarlab`、`UiTheme` 主题色值、无自定义应用图标与 logo 一律未改动。
-- 启动入口、分辨率自适应、连接码页按约定保留。
 
 ## 本仓库修改内容
 
@@ -50,6 +47,7 @@
 - 车机作为 CCMP initiator 主动拨手机 FE35；服务名解析失败时枚举候选 UUID 兜底，随后发送 CCMP start 帧与业务请求，取回 `endpoint=8`，再直拨 FE36 业务通道 8。
 - 认证成功后忽略手机主动关闭 FE35 / FE36 及部分 TCP 的动作，避免误判线重启导致整轮回连中断。
 - 默认实验配置：`ccmp_initiator` / `chan_sweep` / `beacon13` = `true`，`passive_business` = `false`。
+- 启动入口、分辨率自适应、连接码页部分优化。
 
 ### Android 5.1（API 22）兼容
 
@@ -59,8 +57,6 @@
 
 ### native 层自洽
 
-- `native-auth/` 回退上游基线，JNI 符号为 `Java_local_hicarlab_NativeAuth_*`。
-- `NativeAuth` 的 5 个可选实验方法调整为纯 Java 空实现，避免预编译库缺符号时抛出 `UnsatisfiedLinkError`。
 - 仓库不含编译产物：`app/native-libs/lib/` 被 `.gitignore` 排除，自行构建请参照 `docs/BUILD.md`。
 
 ## 实测设备与结果
