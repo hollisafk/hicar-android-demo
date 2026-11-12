@@ -148,8 +148,12 @@ static int32_t build_start_request_data(void *handle, void *data)
     struct pake_client *pake_client = (struct pake_client *)handle;
     struct pake_start_request_data *send_data = (struct pake_start_request_data *)data;
 
-    send_data->peer_version = get_current_version();
-    send_data->peer_support_version = get_min_version();
+    send_data->peer_version.first = 1;
+    send_data->peer_version.second = 0;
+    send_data->peer_version.third = 0;
+    send_data->peer_support_version.first = 1;
+    send_data->peer_support_version.second = 0;
+    send_data->peer_support_version.third = 0;
     send_data->operation_code = pake_client->operation_code;
     send_data->epk_len = HC_BIG_PRIME_MAX_LEN;
 

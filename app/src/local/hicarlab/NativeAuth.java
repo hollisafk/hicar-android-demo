@@ -8,13 +8,12 @@ final class NativeAuth {
     static synchronized native byte[][] step(long handle,byte[] packet,int keyLength);
     static synchronized native byte[] sessionKey(long handle);
     static synchronized native void close(long handle);
-    /* Optional PSK-SPEKE layer; inert unless the native library was built
-     * with -DENABLE_PSK_SPEKE=ON. Never exposes key material to Java. */
-    static synchronized native void enablePskSpeke(int on);
-    static synchronized native int hasPsk(String peer);
-    static synchronized native void forgetPsk(String peer);
-    /* Optional Huawei AUTH_* wire compatibility; inert unless the native
-     * library was built with -DENABLE_WIRE_AUTH=ON. */
-    static synchronized native void enableWireAuth(int on);
-    static synchronized native int wireAuthEnabled();
+    /* 可选 PSK-SPEKE / AUTH_* wire 兼容层：上游 native 库未编入这两个实验模块，
+     * 保持纯 Java 空实现，避免低版本设备加载时抛出 UnsatisfiedLinkError。
+     * 两个运行时开关默认关闭，核心 HiChain 会话不受影响。 */
+    static synchronized void enablePskSpeke(int on){}
+    static synchronized int hasPsk(String peer){return 0;}
+    static synchronized void forgetPsk(String peer){}
+    static synchronized void enableWireAuth(int on){}
+    static synchronized int wireAuthEnabled(){return 0;}
 }

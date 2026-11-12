@@ -25,27 +25,8 @@ target_include_directories(carlink_hichain PRIVATE
   "${AUTH}/base" "${AUTH}/auth_info" "${AUTH}/huks_adapter" "${AUTH}/json"
   "${AUTH}/key_agreement" "${AUTH}/log" "${AUTH}/schedule" "${AUTH}/struct"
   "${SOURCE_ROOT}/huks/interfaces/innerkits/huks_lite" "${HUKS}" "${HUKS}/common"
-  "${HUKS}/soft_service" "${CJSON_INCLUDE}" "${CMAKE_CURRENT_SOURCE_DIR}")
+  "${HUKS}/soft_service" "${CJSON_INCLUDE}")
 target_compile_definitions(carlink_hichain PRIVATE _CUT_LOG_ _POSIX_C_SOURCE=200809L)
-
-# Optional PSK-SPEKE passwordless re-authentication (reverse engineered from
-# HwDeviceAuth). OFF by default: with the switch off, HC_PIN_BUFF_LEN stays 16,
-# no extra source is compiled and the binary behaves exactly as upstream.
-option(ENABLE_PSK_SPEKE "Enable optional PSK-SPEKE re-authentication" OFF)
-if(ENABLE_PSK_SPEKE)
-  message(STATUS "PSK-SPEKE layer ENABLED (runtime switch still defaults to off)")
-  target_compile_definitions(carlink_hichain PRIVATE _ENABLE_PSK_SPEKE_)
-  target_sources(carlink_hichain PRIVATE psk_speke.c)
-endif()
-
-# Huawei AUTH_* wire compatibility: message-code translation at the JSON
-# boundary plus the "2.0.31" algorithm-mask version string. OFF by default.
-option(ENABLE_WIRE_AUTH "Enable Huawei AUTH_* wire compatibility" OFF)
-if(ENABLE_WIRE_AUTH)
-  message(STATUS "AUTH_* wire compatibility ENABLED (runtime switch still defaults to off)")
-  target_compile_definitions(carlink_hichain PRIVATE _ENABLE_WIRE_AUTH_)
-  target_sources(carlink_hichain PRIVATE hichain_wire.c)
-endif()
 target_link_libraries(carlink_hichain PRIVATE OpenSSL::Crypto "${CJSON_LIB}" "${MBEDCRYPTO_LIB}")
 set_target_properties(carlink_hichain PROPERTIES BUILD_RPATH "$ORIGIN/lib" INSTALL_RPATH "$ORIGIN/lib")
 if(NOT APPLE)

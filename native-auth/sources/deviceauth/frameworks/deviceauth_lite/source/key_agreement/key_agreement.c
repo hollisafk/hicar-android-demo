@@ -16,9 +16,6 @@
 #include "key_agreement.h"
 #include "base.h"
 #include "log.h"
-#ifdef _ENABLE_WIRE_AUTH_
-#include "hichain_wire.h"
-#endif
 
 #ifdef DESC
 #undef DESC
@@ -67,29 +64,7 @@ void set_last_time_sec(struct key_agreement_protocol *handle)
 
 struct key_agreement_version get_current_version(void)
 {
-#ifdef _ENABLE_WIRE_AUTH_
-    /* Huawei reads its algorithm mask from the third component of
-     * currentVersion ("2.0.31"); a peer still sending "1.0.0" is treated
-     * as not supporting PSK_SPEKE. The comparison baseline used by
-     * is_peer_support_current_version() stays at 1.0.0 so older self-built
-     * peers keep working. */
-    if (hichain_wire_is_enabled()) {
-        uint32_t v[3] = { 0, 0, 0 };
-        struct key_agreement_version out = { 1, 0, 0 };
-        hichain_wire_version(v);
-        out.first = v[0];
-        out.second = v[1];
-        out.third = v[2];
-        return out;
-    }
-#endif
     return g_current_version;
-}
-
-struct key_agreement_version get_min_version(void)
-{
-    struct key_agreement_version v = { 1, 0, 0 };
-    return v;
 }
 
 static bool is_version_bigger(struct key_agreement_version *dst, struct key_agreement_version *src);
