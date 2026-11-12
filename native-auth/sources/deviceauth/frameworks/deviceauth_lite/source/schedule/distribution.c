@@ -25,6 +25,9 @@
 #include "remove_auth_info.h"
 #include "add_auth_info_client.h"
 #include "remove_auth_info_client.h"
+#ifdef _ENABLE_WIRE_AUTH_
+#include "hichain_wire.h"
+#endif
 
 #ifdef DESC
 #undef DESC
@@ -270,6 +273,15 @@ static bool is_message_illegal(int32_t operation_code, int32_t modular)
                                              { SEC_CLONE_OP, STS_MODULAR },
                                              { SEC_CLONE_OP, SEC_CLONE_MODULAR } };
 
+#ifdef _ENABLE_WIRE_AUTH_
+    /* A PSK-SPEKE phone may label its PAKE flow AUTHENTICATE(2). Upstream
+     * only allows BIND(1) / AUTH_KEY_AGREEMENT(6) with PAKE_MODULAR, so the
+     * follow-up messages would otherwise be rejected as inconsistent. */
+    if (hichain_wire_is_enabled() && (modular == PAKE_MODULAR) &&
+        (operation_code == AUTHENTICATE)) {
+        return false;
+    }
+#endif
     for (uint32_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
         if ((modular == table[i].modular) && (operation_code == table[i].operation_code)) {
             return false;
@@ -281,10 +293,16 @@ static bool is_message_illegal(int32_t operation_code, int32_t modular)
 static int32_t get_operation_from_pake(void *payload)
 #if !(defined(_CUT_PAKE_) || defined(_CUT_PAKE_SERVER_))
 {
-    int32_t permissible_code[] = { BIND, AUTH_KEY_AGREEMENT };
+    int32_t permissible_code[] = { BIND, AUTH_KEY_AGREEMENT, AUTHENTICATE };
+    uint32_t permissible_count = 2; /* upstream: BIND and AUTH_KEY_AGREEMENT only */
+#ifdef _ENABLE_WIRE_AUTH_
+    if (hichain_wire_is_enabled()) {
+        permissible_count = 3; /* some phone builds label the PAKE flow AUTHENTICATE */
+    }
+#endif
     struct pake_start_request_data *data = payload;
 
-    for (uint32_t i = 0; i < sizeof(permissible_code) / sizeof(int32_t); i++) {
+    for (uint32_t i = 0; i < permissible_count; i++) {
         if (permissible_code[i] == data->operation_code) {
             return data->operation_code;
         }

@@ -19,7 +19,7 @@ final class MicrophoneSender implements MicrophoneControl.Output,DeviceBusiness.
     MicrophoneSender(Context c,String owner,String peer,byte[] key,Events events)throws IOException{
         context=c.getApplicationContext();this.events=events;this.peer=InetAddress.getByName(peer);socket=new DatagramSocket(new InetSocketAddress(owner,0));cipher=new SessionCipher(key,65536);
     }
-    static boolean enabled(Context c){return c.getSharedPreferences("ui",0).getBoolean("microphone",false)&&c.checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED;}
+    static boolean enabled(Context c){return c.getSharedPreferences("ui",0).getBoolean("microphone",false)&&(android.os.Build.VERSION.SDK_INT<23||c.checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED);}
     public boolean allowed(){return !closed&&events.active()&&enabled(context);}
     public boolean ready(){return allowed();}public int port(){return socket.getLocalPort();}
     String status(){return status;}
@@ -52,7 +52,9 @@ final class MicrophoneSender implements MicrophoneControl.Output,DeviceBusiness.
                     if(muted!=silenced){silenced=muted;status=muted?"麦克风被系统静音，请检查其他应用通话或录音":"麦克风正在采集";
                         events.log(muted?"系统报告本应用录音被静音；未读取其他应用录音信息。":"系统已恢复本应用麦克风输入。");}
                 }
-                int n=record.read(pcm,filled,pcm.length-filled,AudioRecord.READ_BLOCKING);if(n<=0)throw new IOException("microphone read");filled+=n;if(filled<pcm.length)continue;
+                // 4 参 read()/READ_BLOCKING 是 API 23；Android 5.x 只能用 3 参阻塞读。
+                int n=android.os.Build.VERSION.SDK_INT>=23?record.read(pcm,filled,pcm.length-filled,AudioRecord.READ_BLOCKING):record.read(pcm,filled,pcm.length-filled);
+                if(n<=0)throw new IOException("microphone read");filled+=n;if(filled<pcm.length)continue;
                 int index=encoder.dequeueInputBuffer(10000);
                 if(index>=0){ByteBuffer input=encoder.getInputBuffer(index);if(input==null||input.capacity()<4096)throw new IOException("microphone encoder input");input.clear();input.order(ByteOrder.LITTLE_ENDIAN);for(short value:pcm){input.putShort(value);input.putShort(value);}encoder.queueInputBuffer(index,0,4096,samples*1000000L/48000,0);}
                 samples+=pcm.length;filled=0;Arrays.fill(pcm,(short)0);

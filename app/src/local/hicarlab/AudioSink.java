@@ -9,17 +9,26 @@ import java.util.concurrent.*;
 
 /** AAC-LC -> PCM16 AudioTrack, per native SSRC stream; no recording. */
 final class AudioSink implements AudioReceiver.Sink {
-    private final Context context;private final AudioManager manager;private final AudioFocusRequest focus;
+    private final Context context;private final AudioManager manager;/** API 26+ 为 AudioFocusRequest；5.x 为 null（走老 API，监听器存 focusListener）。 */
+    private final Object focus;private final AudioManager.OnAudioFocusChangeListener focusListener;
     private final Map<Integer,Stream> streams=new HashMap<>();
     private volatile boolean closed,focused;
     AudioSink(Context c)throws IOException{
         context=c.getApplicationContext();manager=(AudioManager)c.getSystemService(Context.AUDIO_SERVICE);
         MediaFormat probe=MediaFormat.createAudioFormat("audio/mp4a-latm",48000,2);
         if(new MediaCodecList(MediaCodecList.REGULAR_CODECS).findDecoderForFormat(probe)==null)throw new IOException("AAC decoder unavailable");
-        focus=new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(attributes()).setWillPauseWhenDucked(true)
-            .setOnAudioFocusChangeListener(this::focusChanged,new Handler(Looper.getMainLooper())).build();
-        focused=manager.requestAudioFocus(focus)==AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
-        if(!focused){manager.abandonAudioFocusRequest(focus);throw new IOException("audio focus unavailable");}
+        focusListener=this::focusChanged;
+        if(Build.VERSION.SDK_INT>=26){
+            AudioFocusRequest r=new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(attributes()).setWillPauseWhenDucked(true)
+                .setOnAudioFocusChangeListener(focusListener,new Handler(Looper.getMainLooper())).build();
+            focus=r;
+            focused=manager.requestAudioFocus(r)==AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+            if(!focused){manager.abandonAudioFocusRequest(r);throw new IOException("audio focus unavailable");}
+        }else{ // 5.x：老三参 API（STREAM_MUSIC + GAIN），语义与 26+ 版本一致
+            focus=null;
+            focused=manager.requestAudioFocus(focusListener,AudioManager.STREAM_MUSIC,AudioManager.AUDIOFOCUS_GAIN)==AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+            if(!focused){manager.abandonAudioFocus(focusListener);throw new IOException("audio focus unavailable");}
+        }
         DiagnosticLog.add(context,"AAC 解码能力与音频焦点已就绪；尚未实际解码或出声。");
     }
     private static AudioAttributes attributes(){return new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build();}
@@ -40,7 +49,7 @@ final class AudioSink implements AudioReceiver.Sink {
         stream.offer(frame);
     }
     public synchronized void reset(){for(Stream s:streams.values())s.close();streams.clear();}
-    public synchronized void close(){if(closed)return;closed=true;focused=false;reset();manager.abandonAudioFocusRequest(focus);}
+    public synchronized void close(){if(closed)return;closed=true;focused=false;reset();if(focus!=null)manager.abandonAudioFocusRequest((AudioFocusRequest)focus);else manager.abandonAudioFocus(focusListener);}
     private final class Stream implements Runnable {
         final int rate,channels,index;
         final ArrayBlockingQueue<byte[]> pending=new ArrayBlockingQueue<>(32);
@@ -77,14 +86,16 @@ final class AudioSink implements AudioReceiver.Sink {
                         if(encoding!=AudioFormat.ENCODING_PCM_16BIT||(ch!=1&&ch!=2))throw new IOException("AAC output PCM format");
                         int mask=ch==1?AudioFormat.CHANNEL_OUT_MONO:AudioFormat.CHANNEL_OUT_STEREO,min=AudioTrack.getMinBufferSize(r,mask,encoding);if(min<1)throw new IOException("audio buffer unavailable");
                         if(track!=null){track.release();track=null;}
-                        track=new AudioTrack.Builder().setAudioAttributes(attributes()).setAudioFormat(new AudioFormat.Builder().setEncoding(encoding).setSampleRate(r).setChannelMask(mask).build()).setTransferMode(AudioTrack.MODE_STREAM).setBufferSizeInBytes(Math.max(min*2,r*ch*2/10)).build();
+                        int bufBytes=Math.max(min*2,r*ch*2/10);
+                        if(Build.VERSION.SDK_INT>=23)track=new AudioTrack.Builder().setAudioAttributes(attributes()).setAudioFormat(new AudioFormat.Builder().setEncoding(encoding).setSampleRate(r).setChannelMask(mask).build()).setTransferMode(AudioTrack.MODE_STREAM).setBufferSizeInBytes(bufBytes).build();
+                        else track=new AudioTrack(AudioManager.STREAM_MUSIC,r,mask,encoding,bufBytes,AudioTrack.MODE_STREAM);
                         if(track.getState()!=AudioTrack.STATE_INITIALIZED)throw new IOException("AudioTrack state");track.play();
                         DiagnosticLog.add(context,"AAC 解码输出："+r+" Hz，"+ch+" 声道，PCM16；AudioTrack 已开始。");
                     }else if(output>=0){
                         try{
                             if(info.size>0&&track!=null&&focused){ByteBuffer pcm=codec.getOutputBuffer(output);if(pcm==null)throw new IOException("audio output unavailable");pcm.position(info.offset);pcm.limit(info.offset+info.size);boolean signal=false;for(int at=pcm.position();at<pcm.limit();at++)if(pcm.get(at)!=0){signal=true;break;}
                                 int total=0;while(pcm.hasRemaining()&&!closed&&!ended&&focused){int n=track.write(pcm,pcm.remaining(),AudioTrack.WRITE_BLOCKING);if(n<0)throw new IOException("audio write failed");if(n==0)break;total+=n;}
-                                if(total>0){decoded++;if(signal)nonzero++;if(decoded<=3||decoded%200==0){AudioDeviceInfo route=track.getRoutedDevice();DiagnosticLog.add(context,"PCM 已写入播放设备："+decoded+" 块，非零 "+nonzero+" 块，输出设备类型 "+(route==null?0:route.getType())+"；实际出声请听音确认。");}}
+                                if(total>0){decoded++;if(signal)nonzero++;if(decoded<=3||decoded%200==0){String routeInfo="";if(Build.VERSION.SDK_INT>=23){AudioDeviceInfo route=track.getRoutedDevice();routeInfo="，输出设备类型 "+(route==null?0:route.getType());}DiagnosticLog.add(context,"PCM 已写入播放设备："+decoded+" 块，非零 "+nonzero+" 块"+routeInfo+"；实际出声请听音确认。");}}
                             }
                         }finally{codec.releaseOutputBuffer(output,false);}
                     }

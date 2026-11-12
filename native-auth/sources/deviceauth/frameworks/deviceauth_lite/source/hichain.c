@@ -25,6 +25,10 @@
 #include "mem_stat.h"
 #include "huks_adapter.h"
 #include "sec_clone_server.h"
+#ifdef _ENABLE_WIRE_AUTH_
+#include "hichain_wire.h"
+#include "key_agreement_version.h" /* RET_STR_LENGTH */
+#endif
 
 #define LIST_TRUST_PEER_DEF_COUNT 0
 
@@ -440,6 +444,27 @@ DLL_API_PUBLIC int32_t start_pake(hc_handle handle, const struct operation_param
     LOGI("End start pake");
     return ret;
 }
+
+#ifdef _ENABLE_PSK_SPEKE_
+/* See hichain.h. Reuses the ordinary PAKE object and state machine; only the
+ * operation code differs, which is what makes get_protocol_params() inject a
+ * PSK-derived PIN instead of the user-entered one. */
+DLL_API_PUBLIC int32_t start_pake_ex(hc_handle handle, const struct operation_parameter *params,
+                                     int32_t operation_code)
+{
+    check_ptr_return_val(handle, HC_INPUT_ERROR);
+    check_ptr_return_val(params, HC_INPUT_ERROR);
+    if ((operation_code != BIND) && (operation_code != AUTH_KEY_AGREEMENT))
+        return HC_INPUT_ERROR;
+    struct hichain *hichain = (struct hichain *)handle;
+    int32_t ret = build_object(hichain, PAKE_MODULAR, true, params);
+    if (ret != HC_OK) {
+        LOGE("Build pake client sub object failed, error code is %d", ret);
+        return ret;
+    }
+    return triggered_pake_client(hichain, operation_code);
+}
+#endif
 
 #ifndef _CUT_API_
 
@@ -869,7 +894,16 @@ static int32_t deserialize_message(const struct uint8_buff *data, struct message
 #endif
 
     /* message payload deserialization */
-    int32_t ret = build_struct_by_receive_data(pass_through_data->message_code, pass_through_data->payload_data,
+    uint32_t msg_code = (uint32_t)pass_through_data->message_code;
+#ifdef _ENABLE_WIRE_AUTH_
+    /* Huawei PSK-SPEKE AUTH puts AUTH_* codes on the wire. Translate them
+     * back to PAKE_* here so navigate_message()/is_message_illegal()/the
+     * state machine and all SPEKE payload parsers stay untouched. */
+    if (hichain_wire_is_enabled()) {
+        msg_code = hichain_wire_in((uint16_t)msg_code);
+    }
+#endif
+    int32_t ret = build_struct_by_receive_data(msg_code, pass_through_data->payload_data,
                                                JSON_STRING_DATA, receive);
     if (ret != HC_OK) {
         LOGE("Build struct by receive data failed, error code is %d", ret);
@@ -897,7 +931,12 @@ static int32_t deserialize_message_with_json_object(const void *json_object, str
     }
 #endif
     /* message payload deserialization */
-    int32_t ret = build_struct_by_receive_data(message_code, obj_value, JSON_OBJECT_DATA, receive);
+#ifdef _ENABLE_WIRE_AUTH_
+    if (hichain_wire_is_enabled()) {
+        message_code = (int32_t)hichain_wire_in((uint16_t)message_code);
+    }
+#endif
+    int32_t ret = build_struct_by_receive_data((uint32_t)message_code, obj_value, JSON_OBJECT_DATA, receive);
     if (ret != HC_OK) {
         LOGE("Build struct by receive data failed, error code is %d", ret);
     }
@@ -1023,6 +1062,12 @@ static int32_t build_send_data_by_struct(const struct message *message, void **s
         if (*send_data == NULL) {
             return HC_BUILD_SEND_DATA_FAILED;
         }
+#ifdef _ENABLE_WIRE_AUTH_
+        /* Emit AUTH_* codes on the wire while keeping PAKE_* internally.
+         * Only the top-level "message" number is rewritten; payloads are
+         * byte-identical, exactly like AuthRequest.changeToAuthMsgCode(). */
+        (void)hichain_wire_rewrite_json((char *)*send_data, RET_STR_LENGTH);
+#endif
         *send_data_len = strlen(*send_data);
         return HC_OK;
     }

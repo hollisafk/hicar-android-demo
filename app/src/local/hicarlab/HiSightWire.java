@@ -86,7 +86,7 @@ final class HiSightWire implements AutoCloseable {
         }else if(method.equals("GET_PARAMETER")){
             Set<String> requested=new HashSet<>();for(String row:body.split("\r?\n")){String k=row.split(":",2)[0].trim();if(!k.isEmpty())requested.add(k);}
             Map<String,String> caps=new LinkedHashMap<>();caps.put("his_version","1.0");
-            caps.put("his_video_formats","codecs 1;fps 30;gop 30;bitrate 2000000;vbr-min 1000000;vbr-max 3000000;dpi 160;scr-w 800;scr-h 480;width 800;height 480");
+            caps.put("his_video_formats",VideoSpec.formats());
             caps.put("his_device_type","device_type 4;subtype 0;");
             if(inputEnabled)caps.put("his_uibc_capability","input_category_list=GENERIC;generic_cap_list=left_point_down, left_point_up, left_move, left_key_down, left_key_up;");
             StringBuilder answer=new StringBuilder();for(Map.Entry<String,String> c:caps.entrySet())if(requested.contains(c.getKey()))answer.append(c.getKey()).append(": ").append(c.getValue()).append("\r\n");
@@ -104,12 +104,14 @@ final class HiSightWire implements AutoCloseable {
         }else if(method.equals("TEARDOWN")){replies.add(pack(message("RTSP/1.0 200 OK",seq,""),false));teardown=true;}
         else if(method.equals("RTSP/1.0")&&seq.equals(setupSequence)){
             if(!start.startsWith("RTSP/1.0 200 "))throw new IOException("rtsp setup refused");
-            Matcher port=Pattern.compile("(?:^|;)server_port=([0-9]+)").matcher(headers.getOrDefault("transport",""));
+            Matcher port=Pattern.compile("(?:^|;)server_port=([0-9]+)").matcher(getStr(headers,"transport"));
             if(!port.find())throw new IOException("rtsp media port");int p=Integer.parseInt(port.group(1));if(p<1||p>65535)throw new IOException("rtsp media port");
-            Matcher remote=Pattern.compile("(?:^|;)remotectl_port=([0-9]+)").matcher(headers.getOrDefault("transport",""));
+            Matcher remote=Pattern.compile("(?:^|;)remotectl_port=([0-9]+)").matcher(getStr(headers,"transport"));
             if(remote.find()){int input=Integer.parseInt(remote.group(1));if(input<1||input>65535)throw new IOException("rtsp input port");inputPort=input;}
             mediaPort=p;events.log("HiSight 视频端口已协商；仅向本轮已认证手机连接。");
         }
     }
     public void close(){cipher.close();Arrays.fill(buffer,(byte)0);buffer=new byte[0];failed=true;}
+    /** Android 5.x(API22) 兼容：Map.getOrDefault 需要 API 24。 */
+    private static String getStr(java.util.Map<String,String> m, String k) { return m.containsKey(k) ? m.get(k) : ""; }
 }

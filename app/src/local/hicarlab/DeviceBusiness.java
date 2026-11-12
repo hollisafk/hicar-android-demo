@@ -61,9 +61,9 @@ final class DeviceBusiness implements ControlSession.Business {
                 List<byte[]> announcements=new ArrayList<>();
                 if((mask&8)!=0&&display!=null&&display.ready()&&!announced){
                     JSONObject service=new JSONObject().put("deviceId",id).put("deviceName","HiCarLab").put("serviceId","display1").put("serviceType",8)
-                        .put("properties",new JSONObject().put("4001",1.0).put("1009",800).put("1010",480)).put("status",new JSONObject());
+                        .put("properties",new JSONObject().put("4001",1.0).put("1009",VideoSpec.WIDTH).put("1010",VideoSpec.HEIGHT)).put("status",new JSONObject());
                     byte[] reply=packet(NearbyWire.join(NearbyWire.uint(102),service.toString().getBytes(StandardCharsets.UTF_8)));announced=true;
-                    events.log("H.264 解码器和窗口就绪，已宣布 800×480 显示服务；尚未收到视频。");announcements.add(reply);
+                    events.log("H.264 解码器和窗口就绪，已宣布 "+VideoSpec.WIDTH+"×"+VideoSpec.HEIGHT+" 显示服务；尚未收到视频。");announcements.add(reply);
                 }
                 if((mask&4)!=0&&speaker!=null&&speaker.ready()&&!speakerAnnounced){
                     JSONObject service=new JSONObject().put("deviceId",id).put("deviceName","HiCarLab").put("serviceId","speaker1").put("serviceType",4)

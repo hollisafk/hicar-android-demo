@@ -14,10 +14,23 @@
 #include "hichain.h"
 #include "hks_file_api.h"
 #include "hks_hardware_api.h"
+#ifdef _ENABLE_PSK_SPEKE_
+#include "psk_speke.h"
+#endif
+#ifdef _ENABLE_WIRE_AUTH_
+#include "hichain_wire.h"
+#endif
 
 static int root_fd=-1;
 static uint8_t hardware_id[32];
-static int valid_name(const char *s) {return s&&(!strcmp(s,"info1.data")||!strcmp(s,"info2.data")||!strcmp(s,"hks_keystore"));}
+static int valid_name(const char *s) {
+ if(!s)return 0;
+ if(!strcmp(s,"info1.data")||!strcmp(s,"info2.data")||!strcmp(s,"hks_keystore"))return 1;
+#ifdef _ENABLE_PSK_SPEKE_
+ if(!strcmp(s,PSK_SPEKE_FILE))return 1;
+#endif
+ return 0;
+}
 static int32_t read_file(const char *n,uint32_t off,uint8_t *b,uint32_t len){
  if(!valid_name(n)||off>1048576||len>1048576-off)return -1;
  int fd=openat(root_fd,n,O_RDONLY|O_NOFOLLOW);if(fd<0)return errno==ENOENT?0:-1;
@@ -48,11 +61,40 @@ static void transmit(const struct session_identity *i,const void *data,uint32_t 
  uint8_t*b=malloc(len+1);if(!b){s->error=1;return;}memcpy(b,data,len);b[len]=0;s->packets[s->count]=b;s->lengths[s->count++]=len;
 }
 static void params(const struct session_identity*i,int32_t op,struct hc_pin*p,struct operation_parameter*v){
- Session*s=ctx(i);if(!s)return;if(op!=0&&op!=1&&op!=2&&op!=99){s->error=1;return;}*p=s->pin;*v=s->params;
+ Session*s=ctx(i);if(!s)return;
+#ifdef _ENABLE_PSK_SPEKE_
+ /* AUTH_KEY_AGREEMENT (6) is the PSK-SPEKE reconnection. When the runtime
+  * switch is on, inject a tmpAuthKey-derived PIN instead of the user PIN. */
+ if(op==(int32_t)AUTH_KEY_AGREEMENT&&psk_speke_is_enabled()){
+  uint8_t psk[PSK_SPEKE_PSK_LEN],nonce[PSK_SPEKE_NONCE_LEN];
+  int ok=psk_speke_load(&s->params.peer_auth_id,psk)==PSK_SPEKE_OK
+       &&psk_speke_derive_nonce(psk,nonce)==PSK_SPEKE_OK
+       &&psk_speke_build_pin(psk,nonce,p)==PSK_SPEKE_OK;
+  (void)memset(psk,0,sizeof(psk));(void)memset(nonce,0,sizeof(nonce));
+  if(ok){*v=s->params;return;}
+  s->error=1;return; /* never silently fall back to a user PIN in PSK mode */
+ }
+#endif
+ if(op!=0&&op!=1&&op!=2&&op!=99){s->error=1;return;}*p=s->pin;*v=s->params;
 }
 static void set_key(const struct session_identity*i,const struct hc_session_key*k){Session*s=ctx(i);if(s&&k&&k->length>0&&k->length<=128)s->key=*k;else if(s)s->error=1;}
-static void result(const struct session_identity*i,int32_t r){Session*s=ctx(i);if(s)s->result=r;}
-static int32_t confirm(const struct session_identity*i,int32_t op){(void)i;return op==1||op==2?0:-1;}
+static void result(const struct session_identity*i,int32_t r){
+ Session*s=ctx(i);if(!s)return;
+#ifdef _ENABLE_PSK_SPEKE_
+ /* First successful BIND is where both peers provably hold the same session
+  * key. Persist it as the long-term PSK for later passwordless AUTH runs. */
+ if(r==0&&psk_speke_is_enabled()&&(s->key.length==16||s->key.length==32))
+  (void)psk_speke_save(&s->params.peer_auth_id,&s->key);
+#endif
+ s->result=r;
+}
+static int32_t confirm(const struct session_identity*i,int32_t op){(void)i;
+#ifdef _ENABLE_WIRE_AUTH_
+ /* A real phone can open an AUTH flow with BIND(1), AUTHENTICATE(2) or
+  * AUTH_KEY_AGREEMENT(6); upstream only confirms 1 and 2. */
+ if(hichain_wire_is_enabled()&&hichain_wire_accept_op(op))return 0;
+#endif
+ return op==1||op==2?0:-1;}
 static int copy_string(JNIEnv*e,jstring str,uint8_t*out,int max){
  if(!str)return 0;const char*p=(*e)->GetStringUTFChars(e,str,NULL);if(!p)return 0;
  int n=(int)strlen(p);if(n>0&&n<=max)memcpy(out,p,n);else n=0;(*e)->ReleaseStringUTFChars(e,str,p);return n;
@@ -63,15 +105,27 @@ JNIEXPORT jint JNICALL Java_local_hicarlab_NativeAuth_init(JNIEnv*e,jclass c,jst
  const char*p=(*e)->GetStringUTFChars(e,path,NULL);if(!p)return -1;
  root_fd=open(p,O_RDONLY|O_DIRECTORY|O_NOFOLLOW);(*e)->ReleaseStringUTFChars(e,path,p);if(root_fd<0)return -2;
  struct stat s;if(fstat(root_fd,&s)||s.st_mode&0077){close(root_fd);root_fd=-1;return -3;}
- int r=hks_register_file_callbacks(&files);if(!r)r=hks_register_get_hardware_udid_callback(udid);if(r){close(root_fd);root_fd=-1;}return r;
+ int r=hks_register_file_callbacks(&files);if(!r)r=hks_register_get_hardware_udid_callback(udid);if(r){close(root_fd);root_fd=-1;}
+#ifdef _ENABLE_PSK_SPEKE_
+ if(!r)psk_speke_init(read_file,write_file);
+#endif
+ return r;
 }
 JNIEXPORT jlong JNICALL Java_local_hicarlab_NativeAuth_create(JNIEnv*e,jclass c,jstring self,jstring peer,jstring pin,jint role){
  (void)c;if(root_fd<0||(role!=1&&role!=2))return 0;Session*s=calloc(1,sizeof(*s));if(!s)return 0;s->result=-1;
  s->params.self_auth_id.length=copy_string(e,self,s->params.self_auth_id.auth_id,64);
  s->params.peer_auth_id.length=copy_string(e,peer,s->params.peer_auth_id.auth_id,64);
- s->pin.length=copy_string(e,pin,s->pin.pin,16);s->params.key_length=32;
- if(!s->params.self_auth_id.length||!s->params.peer_auth_id.length||s->pin.length!=6){free(s);return 0;}
- for(int j=0;j<6;j++)if(s->pin.pin[j]<'0'||s->pin.pin[j]>'9'){free(s);return 0;}
+ s->pin.length=copy_string(e,pin,s->pin.pin,HC_PIN_BUFF_LEN);s->params.key_length=32;
+ if(!s->params.self_auth_id.length||!s->params.peer_auth_id.length){free(s);return 0;}
+#ifdef _ENABLE_PSK_SPEKE_
+ int psk_mode=psk_speke_is_enabled()&&psk_speke_has(&s->params.peer_auth_id);
+#else
+ int psk_mode=0;
+#endif
+ if(!psk_mode){
+  if(s->pin.length!=6){free(s);return 0;}
+  for(int j=0;j<6;j++)if(s->pin.pin[j]<'0'||s->pin.pin[j]>'9'){free(s);return 0;}
+ }
  s->identity.package_name.length=16;memcpy(s->identity.package_name.name,"com.huawei.hicar",16);
  s->identity.service_type.length=9;memcpy(s->identity.service_type.type,"CarDevice",9);
  s->identity.context=s;s->callbacks=(struct hc_call_back){transmit,params,set_key,result,confirm};
@@ -81,7 +135,14 @@ JNIEXPORT jobjectArray JNICALL Java_local_hicarlab_NativeAuth_step(JNIEnv*e,jcla
  (void)c;Session*s=(Session*)(intptr_t)handle;if(!s)return NULL;
  if(key_length!=16&&key_length!=32)return NULL;s->params.key_length=key_length;
  int code;
- if(!data)code=start_pake(s->handle,&s->params);
+ if(!data){
+#ifdef _ENABLE_PSK_SPEKE_
+  if(psk_speke_is_enabled()&&psk_speke_has(&s->params.peer_auth_id))
+   code=start_pake_ex(s->handle,&s->params,AUTH_KEY_AGREEMENT);
+  else
+#endif
+  code=start_pake(s->handle,&s->params);
+ }
  else {
   jsize n=(*e)->GetArrayLength(e,data);if(n<=0||n>65536)return NULL;
   uint8_t*b=malloc(n+1);if(!b)return NULL;(*e)->GetByteArrayRegion(e,data,0,n,(jbyte*)b);b[n]=0;
@@ -105,3 +166,39 @@ JNIEXPORT void JNICALL Java_local_hicarlab_NativeAuth_close(JNIEnv*e,jclass c,jl
  (void)e;(void)c;Session*s=(Session*)(intptr_t)handle;if(!s)return;if(s->handle)destroy(&s->handle);
  for(int j=0;j<s->count;j++){memset(s->packets[j],0,s->lengths[j]);free(s->packets[j]);}memset(s,0,sizeof(*s));free(s);
 }
+/* Optional PSK-SPEKE controls. Always present so the Java side needs no
+ * conditional compilation; they are inert unless the native layer was built
+ * with -DENABLE_PSK_SPEKE=ON. No key material crosses the JNI boundary. */
+#ifdef _ENABLE_PSK_SPEKE_
+JNIEXPORT void JNICALL Java_local_hicarlab_NativeAuth_enablePskSpeke(JNIEnv*e,jclass c,jint on){
+ (void)e;(void)c;psk_speke_set_enabled(on!=0);
+}
+JNIEXPORT jint JNICALL Java_local_hicarlab_NativeAuth_hasPsk(JNIEnv*e,jclass c,jstring peer){
+ (void)c;struct hc_auth_id id;(void)memset(&id,0,sizeof(id));
+ id.length=(uint32_t)copy_string(e,peer,id.auth_id,HC_AUTH_ID_BUFF_LEN);
+ if(!id.length)return 0;jint r=psk_speke_has(&id)?1:0;(void)memset(&id,0,sizeof(id));return r;
+}
+JNIEXPORT void JNICALL Java_local_hicarlab_NativeAuth_forgetPsk(JNIEnv*e,jclass c,jstring peer){
+ (void)c;struct hc_auth_id id;(void)memset(&id,0,sizeof(id));
+ id.length=(uint32_t)copy_string(e,peer,id.auth_id,HC_AUTH_ID_BUFF_LEN);
+ if(id.length)(void)psk_speke_forget(&id);(void)memset(&id,0,sizeof(id));
+}
+#else
+JNIEXPORT void JNICALL Java_local_hicarlab_NativeAuth_enablePskSpeke(JNIEnv*e,jclass c,jint on){(void)e;(void)c;(void)on;}
+JNIEXPORT jint JNICALL Java_local_hicarlab_NativeAuth_hasPsk(JNIEnv*e,jclass c,jstring peer){(void)e;(void)c;(void)peer;return 0;}
+JNIEXPORT void JNICALL Java_local_hicarlab_NativeAuth_forgetPsk(JNIEnv*e,jclass c,jstring peer){(void)e;(void)c;(void)peer;}
+#endif
+
+/* Huawei AUTH_* wire compatibility. Always exported so the Java side needs
+ * no conditional compilation; inert unless built with ENABLE_WIRE_AUTH=ON. */
+#ifdef _ENABLE_WIRE_AUTH_
+JNIEXPORT void JNICALL Java_local_hicarlab_NativeAuth_enableWireAuth(JNIEnv*e,jclass c,jint on){
+ (void)e;(void)c;hichain_wire_set_enabled(on!=0);
+}
+JNIEXPORT jint JNICALL Java_local_hicarlab_NativeAuth_wireAuthEnabled(JNIEnv*e,jclass c){
+ (void)e;(void)c;return hichain_wire_is_enabled()?1:0;
+}
+#else
+JNIEXPORT void JNICALL Java_local_hicarlab_NativeAuth_enableWireAuth(JNIEnv*e,jclass c,jint on){(void)e;(void)c;(void)on;}
+JNIEXPORT jint JNICALL Java_local_hicarlab_NativeAuth_wireAuthEnabled(JNIEnv*e,jclass c){(void)e;(void)c;return 0;}
+#endif

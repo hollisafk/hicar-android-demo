@@ -42,7 +42,7 @@ public final class HomeActivity extends ThemeActivity {
         micSwitch=new Switch(this);micSwitch.setText("麦克风语音实验");micSwitch.setChecked(MicrophoneSender.enabled(this));root.addView(micSwitch);
         micStatus=new TextView(this);micStatus.setTextSize(14);micStatus.setPadding(0,dp(8),0,dp(8));root.addView(micStatus);
         micSwitch.setOnCheckedChangeListener((button,checked)->{
-            if(checked&&checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){micSwitch.setChecked(false);requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},MICROPHONE);return;}
+            if(checked&&Build.VERSION.SDK_INT>=23&&checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){micSwitch.setChecked(false);requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},MICROPHONE);return;}
             getSharedPreferences("ui",0).edit().putBoolean("microphone",checked).apply();
             if(!checked)engine().disableMicrophone();
             else if(engine().isActive())Toast.makeText(this,"重新连接后启用；仅在手机请求语音时采集",Toast.LENGTH_LONG).show();
@@ -61,7 +61,7 @@ public final class HomeActivity extends ThemeActivity {
             if(!AutoStart.enabled(this)){Toast.makeText(this,"请先开启“开机自动接收”",Toast.LENGTH_LONG).show();return;}
             String problem=AutoStart.problem(this);if(problem!=null){Toast.makeText(this,problem,Toast.LENGTH_LONG).show();return;}
             if(engine().isActive()){Toast.makeText(this,"请先停止当前连接，再试运行自动接收",Toast.LENGTH_LONG).show();return;}
-            try{startForegroundService(new Intent(this,ReceiverService.class).setAction("AUTO_START"));Toast.makeText(this,"正在试运行：等待手机连接，点击接收通知打开画面；本轮不启用麦克风",Toast.LENGTH_LONG).show();}
+            try{startServiceCompat(new Intent(this,ReceiverService.class).setAction("AUTO_START"));Toast.makeText(this,"正在试运行：等待手机连接，点击接收通知打开画面；本轮不启用麦克风",Toast.LENGTH_LONG).show();}
             catch(RuntimeException e){Toast.makeText(this,"系统未允许自动接收，请检查后台运行设置",Toast.LENGTH_LONG).show();}
         });
         start=button(root,"开始连接",()->{if(engine().isActive())openVideo();else{pending=true;continueStart();}});
@@ -78,21 +78,37 @@ public final class HomeActivity extends ThemeActivity {
         Button b=new Button(this);b.setText(title);b.setTextSize(18);b.setMinHeight(dp(56));
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=dp(10);root.addView(b,p);b.setOnClickListener(v->action.run());return b;
     }
-    private void message(String value){pending=false;engine().reportProblem(value);Toast.makeText(this,value,Toast.LENGTH_LONG).show();}
+    /** Android 8.0 前无 startForegroundService：低版本直接 startService（旧系统无后台启动限制）。 */
+    private void startServiceCompat(Intent i){ if(android.os.Build.VERSION.SDK_INT>=26) startForegroundService(i); else startService(i); }
+
+        private void message(String value){pending=false;engine().reportProblem(value);Toast.makeText(this,value,Toast.LENGTH_LONG).show();}
     private void continueStart(){
         if(!pending)return;
         if(engine().isActive()){pending=false;openVideo();return;}
         List<String> missing=new ArrayList<>();
         if(Build.VERSION.SDK_INT>=31)for(String p:new String[]{Manifest.permission.BLUETOOTH_CONNECT,Manifest.permission.BLUETOOTH_ADVERTISE})if(checkSelfPermission(p)!=PackageManager.PERMISSION_GRANTED)missing.add(p);
-        String wifi=Build.VERSION.SDK_INT>=33?"android.permission.NEARBY_WIFI_DEVICES":Manifest.permission.ACCESS_FINE_LOCATION;
-        if(checkSelfPermission(wifi)!=PackageManager.PERMISSION_GRANTED)missing.add(wifi);
+        if(Build.VERSION.SDK_INT>=23){ // 5.x 无运行时权限，安装时已授予
+            String wifi=Build.VERSION.SDK_INT>=33?"android.permission.NEARBY_WIFI_DEVICES":Manifest.permission.ACCESS_FINE_LOCATION;
+            if(checkSelfPermission(wifi)!=PackageManager.PERMISSION_GRANTED)missing.add(wifi);
+        }
         if(!missing.isEmpty()){requestPermissions(missing.toArray(new String[0]),PERMISSIONS);return;}
         BluetoothManager manager=(BluetoothManager)getSystemService(BLUETOOTH_SERVICE);BluetoothAdapter adapter=manager==null?null:manager.getAdapter();
         if(adapter==null){message("这台设备没有可用蓝牙适配器");return;}
         try{
             if(!adapter.isEnabled()){startActivityForResult(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE),ENABLE);return;}
+            /* 已配对手机回连不需要车机进入可被发现态；请求可发现会触发手机侧
+             * 「靠近发现」确认弹窗。仅首次配对（尚无 peer_mac）才请求。 */
+            if(getSharedPreferences("identity",0).getString("peer_mac",null)!=null){startReceiver();return;}
             startActivityForResult(new Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION,120),DISCOVER);
         }catch(RuntimeException e){message("系统无法打开蓝牙连接请求，请到设置与诊断查看");}
+    }
+    /** 启动接收服务（已配对手机直接回连，或首次配对完成可发现授权后调用）。 */
+    private void startReceiver(){
+        pending=false;
+        String model=getSharedPreferences("identity",0).getString("wire_model","00048000");
+        if(model==null || !model.matches("[0-9A-Fa-f]{8}")){message("接收设置无效，请到设置与诊断检查");return;}
+        try{startServiceCompat(new Intent(this,ReceiverService.class).putExtra("model",model).putExtra("network",true).putExtra("video",true));openVideo();}
+        catch(RuntimeException e){message("接收服务启动失败，请查看诊断页");}
     }
     private void openVideo(){startActivity(new Intent(this,VideoActivity.class).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));}
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){
@@ -109,11 +125,8 @@ public final class HomeActivity extends ThemeActivity {
         super.onActivityResult(request,result,data);if(!pending)return;
         if(request==ENABLE){if(result==RESULT_OK)continueStart();else message("蓝牙尚未开启");}
         if(request==DISCOVER){
-            pending=false;if(result<=0){message("已取消开始连接");return;}
-            String model=getSharedPreferences("identity",0).getString("wire_model","00048000");
-            if(model==null || !model.matches("[0-9A-Fa-f]{8}")){message("接收设置无效，请到设置与诊断检查");return;}
-            try{startForegroundService(new Intent(this,ReceiverService.class).putExtra("model",model).putExtra("network",true).putExtra("video",true));openVideo();}
-            catch(RuntimeException e){message("接收服务启动失败，请查看诊断页");}
+            if(result<=0){message("已取消开始连接");pending=false;return;}
+            startReceiver();
         }
     }
     @Override protected void onStart(){super.onStart();handler.removeCallbacks(update);handler.post(update);}

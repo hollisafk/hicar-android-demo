@@ -46,7 +46,7 @@ final class MicrophoneControl implements ControlSession.TextHandler {
             replies.add(response("200 OK",seq,id,"CryptoVer","1"));if(phase==1)phase=2;
         }else if(start.startsWith("SETUP ")){
             if(phase<2||body.length!=0)throw new IOException("microphone setup order");
-            Matcher transport=Pattern.compile("RTP/AVP/UDP;unicast;client_port=([0-9]{1,5})-(-1|[0-9]{1,5})").matcher(h.getOrDefault("transport",""));
+            Matcher transport=Pattern.compile("RTP/AVP/UDP;unicast;client_port=([0-9]{1,5})-(-1|[0-9]{1,5})").matcher(getStr(h,"transport"));
             if(!transport.matches())throw new IOException("microphone transport");
             int port=Integer.parseInt(transport.group(1)),rtcp=Integer.parseInt(transport.group(2));
             if(port<1||port>65535||rtcp==0||rtcp>65535||phase>2&&remote!=port)throw new IOException("microphone endpoint");
@@ -60,4 +60,6 @@ final class MicrophoneControl implements ControlSession.TextHandler {
         else throw new IOException("microphone request");
         return replies;
     }
+    /** Android 5.x(API22) 兼容：Map.getOrDefault 需要 API 24。 */
+    private static String getStr(java.util.Map<String,String> m, String k) { return m.containsKey(k) ? m.get(k) : ""; }
 }

@@ -39,7 +39,9 @@ public class MainActivity extends ThemeActivity {
     private final java.util.concurrent.atomic.AtomicBoolean authBusy = new java.util.concurrent.atomic.AtomicBoolean();
     private final Runnable backgroundStop = () -> stopBaseline(true);
     private boolean nativeReady;
+    private boolean needBt = false;
     private void initIdentity() {
+        WireIdentity.ensure(this);
         SharedPreferences pref = getSharedPreferences("identity", MODE_PRIVATE);
         localId = pref.getString("id", null); localPin = pref.getString("pin", null);
         java.security.SecureRandom random = new java.security.SecureRandom();
@@ -52,7 +54,51 @@ public class MainActivity extends ThemeActivity {
         try {
             File keys = getDir("huks", MODE_PRIVATE); android.system.Os.chmod(keys.getAbsolutePath(), 0700);
             nativeReady = NativeAuth.init(keys.getAbsolutePath(), localId) == 0;
+            if (nativeReady) {
+                try { NativeAuth.enablePskSpeke(getSharedPreferences("ui", 0).getBoolean("psk_speke", false) ? 1 : 0); }
+                catch (Throwable ignored) { /* library built without the optional layer */ }
+                try { NativeAuth.enableWireAuth(getSharedPreferences("ui", 0).getBoolean("wire_auth", false) ? 1 : 0); }
+                catch (Throwable ignored) { /* library built without the optional layer */ }
+            }
         } catch (Exception | LinkageError e) { nativeReady = false; }
+    }
+    /** 实验通道：允许 adb 用 Intent extra 精确设置开关，避免依赖不稳定的 UI 坐标。
+     *  例：am start -n local.hicarlab/.MainActivity --ez psk_speke true --ez wire_auth true */
+    private void applyIntentSwitches() {
+        Intent intent = getIntent();
+        if (intent == null) return;
+        String[] keys = { "psk_speke", "wire_auth", "auto_probe_reconnect", "ccmp_initiator", "beacon13", "chan_sweep", "passive_business", "quiet_mode", "peer_scan", "scan_trigger", "gatt_probe", "gatt_ccmp", "gatt_direct", "profile_reconnect" };
+        boolean changed = false;
+        for (String key : keys) {
+            if (!intent.hasExtra(key)) continue;
+            boolean on = intent.getBooleanExtra(key, false);
+            getSharedPreferences("ui", MODE_PRIVATE).edit().putBoolean(key, on).commit();
+            log("adb 开关 " + key + "=" + on + "（已写入设置）");
+            changed = true;
+        }
+        if (changed && nativeReady) {
+            SharedPreferences ui = getSharedPreferences("ui", MODE_PRIVATE);
+            try { NativeAuth.enablePskSpeke(ui.getBoolean("psk_speke", false) ? 1 : 0); } catch (Throwable ignored) {}
+            try { NativeAuth.enableWireAuth(ui.getBoolean("wire_auth", false) ? 1 : 0); } catch (Throwable ignored) {}
+        }
+        /* 真车机的 authId 是 SHA256(8 位型号 + 本机 BR/EDR MAC)，HarmonyOS 手机
+         * 会据此反查车机身份与长期公钥。adb 直写省去设置页弹窗：
+         *   am start -n local.hicarlab/.MainActivity --es wire_mac AA:BB:CC:DD:EE:FF
+         * 只改线上身份，不动 HUKS 硬件种子与六位连接码。 */
+        String wireMac = intent.getStringExtra("wire_mac");
+        if (wireMac != null) {
+            String wireModel = intent.getStringExtra("wire_model");
+            if (wireModel == null || wireModel.isEmpty()) wireModel = "00048000";
+            try {
+                WireIdentity.setExplicit(this, wireModel, wireMac);
+                log("adb 已保存本机蓝牙地址派生身份（model=" + wireModel.trim().toUpperCase(Locale.ROOT)
+                        + "）；HUKS 种子与连接码保持不变。显式指定的地址不会被自动纠正，"
+                        + "请务必填系统真实 BR/EDR MAC；请在手机删除旧 HiCar 记录后重新输码配对。");
+                WireIdentity.ensure(this); // 写入后复核：否则身份自检日志停留在写入前的旧值，容易误判
+            } catch (IllegalArgumentException e) {
+                log("adb 保存派生身份失败：" + e.getMessage() + "（地址须为真实本机蓝牙 MAC，不能填屏蔽地址 02:00:00:00:00:00）");
+            }
+        }
     }
     private boolean pendingFdee, pendingNetwork;
     private String pendingModel;
@@ -62,6 +108,12 @@ public class MainActivity extends ThemeActivity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         initIdentity();
+        applyIntentSwitches();
+        // 由主页（VideoActivity）在无蓝牙地址时跳转而来：标记 needBt，待下方 note 创建后再提示。
+        Intent launch = getIntent();
+        if (launch != null && launch.getBooleanExtra("need_bt_address", false)) {
+            needBt = true;
+        }
         BluetoothManager manager = (BluetoothManager)getSystemService(BLUETOOTH_SERVICE);
         adapter = manager == null ? null : manager.getAdapter();
         ScrollView scroll = new ScrollView(this);
@@ -74,9 +126,10 @@ public class MainActivity extends ThemeActivity {
         TextView note = new TextView(this);
         note.setText("设置与诊断\n日常连接请使用首页。下方提供接收设置、权限检查和连接诊断。\n下方保留分阶段测试，进行实验前请先停止当前连接。请停车后操作。");
         note.setTextSize(16); root.addView(note);
+        if (needBt) note.setText("⚠ 尚未设置本机蓝牙地址：请先点下方「设置本机蓝牙身份」填写（从系统“关于手机/状态信息”查看蓝牙地址），保存后本页将自动进入主页。不填则无法进入首页接收。");
         deviceText = new TextView(this); deviceText.setTextIsSelectable(true); deviceText.setTextSize(15); root.addView(deviceText);
         button(root, "1. 授权并检查设备", () -> {
-            if (!permitted()) requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE}, 1);
+            if (Build.VERSION.SDK_INT >= 31 && !permitted()) requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE}, 1);
             else refresh();
         });
         button(root, "2. 基础蓝牙测试（30 秒）", () -> start(false));
@@ -85,6 +138,67 @@ public class MainActivity extends ThemeActivity {
         root.addView(modelLabel);
         modelInput = new EditText(this); modelInput.setSingleLine(true); modelInput.setText("00048000"); root.addView(modelInput);
         button(root, "设置本机蓝牙身份（重连实验）", this::configureWireIdentity);
+        button(root, "进入主页（开始接收）", () -> {
+            if (WireIdentity.resolveMac(MainActivity.this) == null) {
+                log("尚未设置本机蓝牙地址，无法进入主页。请先点“设置本机蓝牙身份”填写蓝牙地址（从系统状态信息查看）。");
+                return;
+            }
+            startActivity(new Intent(MainActivity.this, VideoActivity.class));
+        });
+        button(root, "忘记已配对手机（重新配对）", () -> {
+            if (running || engine().isRunning()) { log("请先停止实验，再忘记已配对手机。"); return; }
+            engine().forgetPeer();
+        });
+        CheckBox pskBox = new CheckBox(this);
+        pskBox.setText("PSK-SPEKE 免密重连（实验性，默认关闭；需两端运行同一实现）");
+        pskBox.setChecked(getSharedPreferences("ui", 0).getBoolean("psk_speke", false));
+        pskBox.setOnCheckedChangeListener((v, isChecked) -> {
+            getSharedPreferences("ui", 0).edit().putBoolean("psk_speke", isChecked).apply();
+            try { NativeAuth.enablePskSpeke(isChecked ? 1 : 0); } catch (Throwable ignored) {}
+            log(isChecked ? "PSK-SPEKE 已启用：首次成功配对后，重连将由本机凭据自动完成。" : "PSK-SPEKE 已关闭，恢复每次输入连接码。");
+        });
+        root.addView(pskBox);
+        CheckBox wireBox = new CheckBox(this);
+        wireBox.setText("华为 AUTH_* 线协议兼容（真实手机互通实验，建议与 PSK-SPEKE 同开）");
+        wireBox.setChecked(getSharedPreferences("ui", 0).getBoolean("wire_auth", false));
+        wireBox.setOnCheckedChangeListener((v, isChecked) -> {
+            getSharedPreferences("ui", 0).edit().putBoolean("wire_auth", isChecked).apply();
+            try { NativeAuth.enableWireAuth(isChecked ? 1 : 0); } catch (Throwable ignored) {}
+            log(isChecked ? "AUTH_* 兼容已启用：线上消息码 0x11/0x12，版本串 2.0.31。" : "AUTH_* 兼容已关闭，恢复标准 PAKE 码与 1.0.0。");
+        });
+        root.addView(wireBox);
+        CheckBox probeBox = new CheckBox(this);
+        probeBox.setText("车机主动回连已配对手机（默认开启；断线后车机主动连回手机，手机免弹窗恢复）");
+        probeBox.setChecked(getSharedPreferences("ui", 0).getBoolean("auto_probe_reconnect", true));
+        probeBox.setOnCheckedChangeListener((v, isChecked) -> {
+            getSharedPreferences("ui", 0).edit().putBoolean("auto_probe_reconnect", isChecked).apply();
+            log(isChecked ? "车机主动回连已启用（默认）：断线后由车机主动连回已配对手机，手机侧免弹窗、走 STS 0x11 免密恢复。" : "车机主动回连已关闭，仅保留持续广播等待手机连接。");
+        });
+        root.addView(probeBox);
+        CheckBox initiatorBox = new CheckBox(this);
+        initiatorBox.setText("无感回连（默认开启；车机主动拨手机 FE35 发起协商并连 FE36，静默窗口 45 秒，免手机点击「靠近发现」）");
+        initiatorBox.setChecked(getSharedPreferences("ui", 0).getBoolean("ccmp_initiator", true));
+        initiatorBox.setOnCheckedChangeListener((v, isChecked) -> {
+            getSharedPreferences("ui", 0).edit().putBoolean("ccmp_initiator", isChecked).apply();
+            log(isChecked ? "无感回连已启用（默认）：静默窗口 45 秒，车机主动发 CCMP start 帧并协商 business 通道；认证成功后关闭广播。" : "无感回连已关闭，恢复原有敲门路径（只建立 ACL 等手机主动连回）。");
+        });
+        root.addView(initiatorBox);
+        CheckBox beaconBox = new CheckBox(this);
+        beaconBox.setText("FDEE 广播使用 13 字节兼容变体（默认开启；用于真机对比 11/13 字节，关闭后发送 11 字节标准帧）");
+        beaconBox.setChecked(getSharedPreferences("ui", 0).getBoolean("beacon13", true));
+        beaconBox.setOnCheckedChangeListener((v, isChecked) -> {
+            getSharedPreferences("ui", 0).edit().putBoolean("beacon13", isChecked).apply();
+            log(isChecked ? "FDEE 广播将使用 13 字节 `... 10 seq 11 e7` 变体（下次开始接收生效）。" : "FDEE 广播将使用 11 字节标准帧（下次开始接收生效）。");
+        });
+        root.addView(beaconBox);
+        CheckBox profileBox = new CheckBox(this);
+        profileBox.setText("系统 profile 主动回连实验（默认关闭；反射 A2DP/HEADSET connect + 拨标准 profile RFCOMM 并保持 ACL，静默窗口 45 秒）");
+        profileBox.setChecked(getSharedPreferences("ui", 0).getBoolean("profile_reconnect", false));
+        profileBox.setOnCheckedChangeListener((v, isChecked) -> {
+            getSharedPreferences("ui", 0).edit().putBoolean("profile_reconnect", isChecked).apply();
+            log(isChecked ? "系统 profile 回连实验已启用：静默窗口 45 秒，尝试触发手机 reconnectType 2。" : "系统 profile 回连实验已关闭，恢复原有敲门路径。");
+        });
+        root.addView(profileBox);
         TextView pinText = new TextView(this); pinText.setText("本机实验连接码：" + localPin); pinText.setTextSize(23); root.addView(pinText);
         TextView nativeText = new TextView(this); nativeText.setText(nativeReady ? "HiChain 原生库：已加载（不代表手机认证成功）" : "HiChain 原生库：初始化失败，不能启动认证实验"); root.addView(nativeText);
         button(root, "3. 发现与认证实验（120 秒）", () -> {
@@ -141,7 +255,7 @@ public class MainActivity extends ThemeActivity {
         input.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
         android.app.AlertDialog dialog=new android.app.AlertDialog.Builder(this)
             .setTitle("填写接收端本机蓝牙地址")
-            .setMessage("从本机系统状态信息查看蓝牙地址。请勿填写华为手机地址或 Wi-Fi 地址。仅保存派生身份，不保存地址。保存后需在华为删除一次本次实验 HiCar 记录，再输码配对；随后再测试免输码重连。原连接码与密钥目录保持。")
+            .setMessage("从本机系统状态信息查看蓝牙地址。请勿填写华为手机地址或 Wi-Fi 地址。地址会单独保存，身份丢失时可自动重算。保存后需在华为删除一次本次实验 HiCar 记录，再输码配对；随后再测试免输码重连。原连接码与密钥目录保持。")
             .setView(input).setNegativeButton("取消",(d,w)->input.setText(""))
             .setNeutralButton("打开本机信息",(d,w)->{
                 input.setText("");
@@ -152,13 +266,13 @@ public class MainActivity extends ThemeActivity {
         dialog.setOnShowListener(d->dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             if(running || engine().isRunning()) { input.setError("请先停止实验"); return; }
             try{
-                String wireId=WireIdentity.derive(model,input.getText().toString());
-                if(!getSharedPreferences("identity",0).edit().putString("wire_model",model).putString("wire_id",wireId).commit()) {
-                    input.setError("保存失败，请重试"); return;
-                }
+                String address=input.getText().toString().trim().toUpperCase(Locale.ROOT);
+                WireIdentity.setExplicit(MainActivity.this, model, address);
                 input.setText(""); dialog.dismiss();
-                log("已保存本机派生身份；未保存地址，未更换 HUKS 种子或连接码。请先重新配对一次，再验证重连。");
-            }catch(IllegalArgumentException e){input.setError("请填写系统显示的本机蓝牙地址，不能使用屏蔽地址");}
+                log("已保存本机蓝牙地址派生身份；未更换 HUKS 种子或连接码。如装到其他设备，启动时会自动重置为本机地址。"
+                        + "请先在该手机删除旧 HiCar 记录并重新输码配对一次，再验证免输码重连。");
+                if (needBt) { needBt = false; startActivity(new Intent(MainActivity.this, VideoActivity.class)); }
+            }catch(IllegalArgumentException e){input.setError("请填写系统状态信息里显示的本机蓝牙地址，不能使用屏蔽地址 02:00:00:00:00:00");}
         }));
         dialog.show();
         dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
@@ -166,9 +280,10 @@ public class MainActivity extends ThemeActivity {
     private void prepareNetwork(boolean video){
             if (!ready()) return;
             if (running || engine().isRunning()) { if(video && engine().isRunning()){startActivity(new Intent(this,VideoActivity.class).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));}else log("实验仍在运行；要更换模式请先点停止。"); return; }
-            if (Build.VERSION.SDK_INT < 29) { log("本轮网络实验需要 Android 10 以上。"); return; }
-            String permission = Build.VERSION.SDK_INT >= 33 ? "android.permission.NEARBY_WIFI_DEVICES" : Manifest.permission.ACCESS_FINE_LOCATION;
-            if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) { requestPermissions(new String[]{permission}, 7); log("请允许本轮 Wi-Fi 权限后再点第5项。"); return; }
+            if (Build.VERSION.SDK_INT >= 23) {
+                String permission = Build.VERSION.SDK_INT >= 33 ? "android.permission.NEARBY_WIFI_DEVICES" : Manifest.permission.ACCESS_FINE_LOCATION;
+                if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) { requestPermissions(new String[]{permission}, 7); log("请允许本轮 Wi-Fi 权限后再点第5项。"); return; }
+            }
             pendingModel = modelInput.getText().toString().trim().toUpperCase(Locale.ROOT);
             try { DiscoveryBeacon.encode(pendingModel, 0); } catch (IllegalArgumentException e) { log("实验型号格式不正确。"); return; }
             stop(false); pendingFdee = true; pendingNetwork = true; pendingVideo=video;
@@ -197,7 +312,8 @@ public class MainActivity extends ThemeActivity {
         s.append("\n系统报告 ABI：").append(Arrays.toString(Build.SUPPORTED_ABIS));
         s.append("\n32 位 ABI：").append(Arrays.toString(Build.SUPPORTED_32_BIT_ABIS));
         s.append("\n64 位 ABI：").append(Arrays.toString(Build.SUPPORTED_64_BIT_ABIS));
-        s.append("\n当前进程：").append(android.os.Process.is64Bit() ? "64 位" : "32 位");
+        // Process.is64Bit() 是 API 23；Android 5.x 没有该接口，且不存在 64 位应用进程。
+        s.append("\n当前进程：").append(Build.VERSION.SDK_INT>=23 ? (android.os.Process.is64Bit() ? "64 位" : "32 位") : "32 位（本系统无进程位数接口）");
         s.append("\nAndroid 蓝牙适配器：").append(adapter != null ? "存在" : "不可见");
         s.append("\nBLE 系统特性：").append(getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE));
         s.append("\n附近设备权限：").append(permitted() ? "已授权／无需运行时申请" : "未授权");
@@ -261,9 +377,11 @@ public class MainActivity extends ThemeActivity {
     private void startFdee() {
         if (!ready()) return;
         Intent service = new Intent(this, ReceiverService.class).putExtra("model", pendingModel).putExtra("network", pendingNetwork).putExtra("video",pendingVideo);
-        try { startForegroundService(service); if(pendingVideo)startActivity(new Intent(this,VideoActivity.class)); }
+            try { startServiceCompat(service); if(pendingVideo)startActivity(new Intent(this,VideoActivity.class)); }
         catch (RuntimeException e) { log("无法启动前台测试服务：" + e.getClass().getSimpleName()); }
     }
+    /** Android 8.0 前无 startForegroundService：低版本直接 startService（旧系统无后台启动限制）。 */
+    private void startServiceCompat(Intent i){ if(android.os.Build.VERSION.SDK_INT>=26) startForegroundService(i); else startService(i); }
     private void listen(String name, UUID uuid, int token, String label) {
         new Thread(() -> {
             BluetoothServerSocket server = null;

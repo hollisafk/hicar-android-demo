@@ -16,7 +16,7 @@ final class UiInput implements AutoCloseable {
     byte[] encode(Event event,long elapsedMs)throws IOException,GeneralSecurityException{
         ByteBuffer body;
         if(event.action>=0&&event.action<=2){
-            if(event.x<0||event.x>=800||event.y<0||event.y>=480||elapsedMs<0)throw new IOException("touch coordinates");
+            if(event.x<0||event.x>=VideoSpec.WIDTH||event.y<0||event.y>=VideoSpec.HEIGHT||elapsedMs<0)throw new IOException("touch coordinates");
             body=ByteBuffer.allocate(14).order(ByteOrder.BIG_ENDIAN);
             body.put((byte)event.action).putShort((short)11).put((byte)1).put((byte)0).putShort((short)event.x).putShort((short)event.y).putInt((int)(elapsedMs&0xffffffffL)).put((byte)0);
         }else if(event.action==3||event.action==4){

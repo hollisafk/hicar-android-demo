@@ -38,12 +38,12 @@ final class SpeakerControl implements ControlSession.TextHandler {
         if(start.startsWith("DMSDP/1.0 ")){
             if(id!=session||Integer.parseInt(cseq)!=setup)return replies;
             if(!start.startsWith("DMSDP/1.0 200 "))throw new IOException("speaker setup refused");
-            Matcher transport=Pattern.compile("RTP/AVP/UDP;unicast;client_port=([0-9]+)--1;server_port=([0-9]+)--1").matcher(headers.getOrDefault("transport",""));
+            Matcher transport=Pattern.compile("RTP/AVP/UDP;unicast;client_port=([0-9]+)--1;server_port=([0-9]+)--1").matcher(getStr(headers,"transport"));
             if(!transport.matches()||Integer.parseInt(transport.group(1))!=output.port())throw new IOException("speaker transport");int port=Integer.parseInt(transport.group(2));if(port<1||port>65535)throw new IOException("speaker remote port");
             output.ready(port);output.log("扬声器 UDP 传输已协商，等待加密音频。");
         }else if(id!=session)throw new IOException("speaker session mismatch");
         else if(start.startsWith("SET_PARAMETER ")){
-            Matcher parameters=Pattern.compile("SampleRate=(48000|44100|32000|24000|16000|8000);Format=16;ChannelNum=([12]);Codec=0").matcher(headers.getOrDefault("audioparameter",""));
+            Matcher parameters=Pattern.compile("SampleRate=(48000|44100|32000|24000|16000|8000);Format=16;ChannelNum=([12]);Codec=0").matcher(getStr(headers,"audioparameter"));
             if(!parameters.matches()||body.length!=0)throw new IOException("speaker audio format");
             int rate=Integer.parseInt(parameters.group(1)),channels=Integer.parseInt(parameters.group(2));output.format(rate,channels);replies.add(ack(cseq,id));output.log("手机音频参数：AAC，"+rate+" Hz，"+channels+" 声道。");
         }else if(start.startsWith("TEARDOWN ")){replies.add(ack(cseq,id));session=-1;output.stop();}
@@ -51,4 +51,6 @@ final class SpeakerControl implements ControlSession.TextHandler {
         else throw new IOException("speaker request");
         return replies;
     }
+    /** Android 5.x(API22) 兼容：Map.getOrDefault 需要 API 24。 */
+    private static String getStr(java.util.Map<String,String> m, String k) { return m.containsKey(k) ? m.get(k) : ""; }
 }

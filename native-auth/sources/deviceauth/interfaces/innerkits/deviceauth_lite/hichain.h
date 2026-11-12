@@ -134,7 +134,15 @@ enum hc_export_type {
 
 #define HC_AUTH_ID_BUFF_LEN 64
 #define HC_SALT_BUFF_LEN    16
+/* A normal PIN is at most 16 bytes. PSK-SPEKE feeds the 64-character hex
+ * representation of a 32-byte tmpAuthKey into the very same SPEKE PAKE, so
+ * PSK-enabled builds need a wider buffer. Kept conditional: with the switch
+ * off the ABI is byte-for-byte identical to upstream. */
+#ifdef _ENABLE_PSK_SPEKE_
+#define HC_PIN_BUFF_LEN     64
+#else
 #define HC_PIN_BUFF_LEN     16
+#endif
 #define HC_SESSION_KEY_LEN  128
 #define HC_KEY_TYPE_LEN     2
 #define HC_BASE_KEY_NUM     5
@@ -330,6 +338,16 @@ DLL_API_PUBLIC int32_t init_center(const struct hc_package_name *package_name,
  * return  0 ok, others error
  */
 DLL_API_PUBLIC int32_t start_pake(hc_handle handle, const struct operation_parameter *params);
+
+#ifdef _ENABLE_PSK_SPEKE_
+/*
+ * PSK-SPEKE extension: identical to start_pake() but lets the caller choose
+ * BIND or AUTH_KEY_AGREEMENT. Compiled only into PSK-enabled builds; the
+ * runtime switch still has to be enabled separately.
+ */
+DLL_API_PUBLIC int32_t start_pake_ex(hc_handle handle, const struct operation_parameter *params,
+                                     int32_t operation_code);
+#endif
 
 /*
  * Authenticate peer identity and build session key

@@ -64,6 +64,10 @@ void init_protocol(struct key_agreement_protocol *handle);
 void set_state(struct key_agreement_protocol *handle, enum protocol_state new_state);
 void set_last_time_sec(struct key_agreement_protocol *handle);
 struct key_agreement_version get_current_version(void);
+/* Minimum supported version advertised in version.minVersion. Always
+ * 1.0.0 today; separated from get_current_version() so the wire layer can
+ * advertise a different currentVersion without changing the baseline. */
+struct key_agreement_version get_min_version(void);
 bool is_peer_support_current_version(struct key_agreement_version *peer_version,
     struct key_agreement_version *peer_support_version);
 

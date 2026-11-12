@@ -171,7 +171,7 @@ static int32_t build_start_response_data(void *handle, void *send_data)
     data->challenge = pake_server->self_challenge;
     data->epk = self_epk;
     data->self_version = get_current_version();
-    data->self_support_version = get_current_version();
+    data->self_support_version = get_min_version();
     return HC_OK;
 }
 

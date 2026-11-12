@@ -65,7 +65,29 @@ public final class NearbyWire {
     }
     static class Negotiator {
         byte[] summary;int seen;int channel;
+        /* HelloCar session.rs::Negotiator 的 initiator 侧（可信自动重连/无感回连）。默认关闭，
+         * 只有车机主动回连调用 start() 后才启用，原有 responder 行为不变。 */
+        boolean initiator,requested;
+        /** 暂时不主动向手机索取业务端口：HiCar 正常方向是手机连回车机 FE36。
+         *  超时后再放开，回落到 HelloCar 的主动索取路径。 */
+        boolean deferRequest;
+        int endpoint=-1;
+        private final List<byte[]> pending=new ArrayList<>();
         Negotiator(byte[] s,int c){summary=s;channel=c;}
+        /** 车机作为 CCMP 发起方：kind 0 首帧载荷 TLV 1=[2], 3=summary, 5=[0]。 */
+        byte[] start(){initiator=true;return join(tlv(1,new byte[]{2}),tlv(3,summary),tlv(5,new byte[]{0}));}
+        /** 暂缓主动 business 索取，先等手机连回车机自己的 FE36。 */
+        void deferOwnBusinessRequest(){deferRequest=true;}
+        /** 等待窗口结束，允许按 HelloCar 方式主动索取手机的 business 端口。 */
+        void allowOwnBusinessRequest(){deferRequest=false;}
+        /** 放开暂缓后立即补发一次 business 请求（若有必要）。 */
+        void requestOwnBusinessIfReady(){
+            if(initiator&&seen==7&&!requested){pending.add(pack(2,tlv(3,join(uint(2),uint(19),uint(0),uint(0)))));requested=true;}
+        }
+        boolean complete(){return seen==7;}
+        /** 取回并清空手机侧 business endpoint（RFCOMM 通道号），-1 表示尚未协商出来。 */
+        int endpoint(){int p=endpoint;endpoint=-1;return p;}
+        List<byte[]> takePending(){List<byte[]> out=new ArrayList<>(pending);pending.clear();return out;}
         byte[] respond(Frame frame)throws IOException {
             if((frame.flags&1)!=0)throw new Invalid("encrypted before authentication");
             ByteArrayOutputStream o=new ByteArrayOutputStream();int next=seen;
@@ -73,9 +95,16 @@ public final class NearbyWire {
                 byte[] reply=null;
                 if(frame.kind==0){
                     if(f.tag==1){if(f.value.length!=1||(f.value[0]&255)<2)throw new Invalid("CCMP version");reply=tlv(2,new byte[]{2});next|=1;}
+                    if(f.tag==2){if(f.value.length!=1||(f.value[0]&255)<2)throw new Invalid("CCMP version response");next|=1;}
+                    if(f.tag==4){if(f.value.length<1||f.value.length>256)throw new Invalid("remote summary");next|=2;}
+                    if(f.tag==6){if(f.value.length!=1||f.value[0]!=0)throw new Invalid("encrypted Nearby channel unsupported");next|=4;}
                     if(f.tag==3){if(f.value.length<1||f.value.length>256)throw new Invalid("summary");reply=tlv(4,summary);next|=2;}
                     if(f.tag==5){if(f.value.length!=1||(f.value[0]&255)>2)throw new Invalid("framing");reply=tlv(6,new byte[]{0});next|=4;}
                 }else if(frame.kind==2&&f.tag==3){
+                    /* 车机作为 initiator 主动拨通手机 FE35 时，本端没有等待回应的本地 business
+                     * 通道（channel=-1）。手机若同时请求 business，按 HelloCar 的做法忽略它，
+                     * 让车机自己发出的请求胜出；旧逻辑会抛异常并关闭整条控制链路。 */
+                    if(initiator&&(channel<1||channel>30))continue;
                     if(seen!=7||channel<1||channel>30)throw new Invalid("business channel unavailable");
                     Cursor c=new Cursor(f.value,0);
                     try {
@@ -86,10 +115,30 @@ public final class NearbyWire {
                         java.nio.ByteBuffer b=java.nio.ByteBuffer.allocate(16).putLong(u.getMostSignificantBits()).putLong(u.getLeastSignificantBits());
                         reply=tlv(4,join(uint(0),uint(channel),f.value,uint(16),b.array()));
                     }catch(Short e){throw new Invalid("business truncated");}
+                    /* HelloCar：手机同时发起 business 时让位给手机，避免两侧抢同一通道。 */
+                    if(initiator){initiator=false;pending.clear();requested=false;endpoint=-1;}
+                }else if(frame.kind==2&&f.tag==4&&initiator){
+                    /* 我们主动请求的响应：0(result) / port / 2 / 19 / tag / 0 / 16 / FE36 UUID(16) */
+                    Cursor c=new Cursor(f.value,0);
+                    try {
+                        int result=c.uint(),port=c.uint(),transport=c.uint(),business=c.uint(),size=c.uint();
+                        if(result!=0||port<1||port>30||transport!=2||business!=19||size>128||size>f.value.length-c.p)
+                            throw new Invalid("remote business rejected");
+                        c.take(size);
+                        if(c.uint()!=0||c.uint()!=16||f.value.length-c.p!=16)throw new Invalid("invalid business transport");
+                        endpoint=port;
+                    }catch(Short e){throw new Invalid("business response truncated");}
                 }
                 if(reply!=null)o.write(reply,0,reply.length);
             }
-            seen=next;return o.size()==0?null:pack(frame.kind,o.toByteArray());
+            seen=next;
+            /* 协商完成后由车机主动请求 business 通道（uint 2/19/0/0 装入 TLV 3，kind 2）。
+             * deferRequest 时先等手机来连车机自己的 FE36，避免向已配对手机索取它不提供的端口。 */
+            if(initiator&&seen==7&&!requested&&!deferRequest){
+                pending.add(pack(2,tlv(3,join(uint(2),uint(19),uint(0),uint(0)))));
+                requested=true;
+            }
+            return o.size()==0?null:pack(frame.kind,o.toByteArray());
         }
     }
 }

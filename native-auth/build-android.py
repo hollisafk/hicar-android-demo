@@ -42,7 +42,13 @@ for abi, target in [('arm64-v8a', 'android-arm64'), ('armeabi-v7a', 'android-arm
         run([cmake, '--build', destination, '-j' + jobs])
         run([cmake, '--install', destination])
     destination = out / 'auth'
-    run([cmake, '-S', root / 'runtime', '-B', destination, *common, '-DSOURCE_ROOT=' + str(root / 'sources'),
+    # HICAR_ENABLE_PSK_SPEKE=1 builds the optional PSK-SPEKE layer in.
+    # The runtime switch still defaults to off; see runtime/psk_speke.h.
+    psk_options = ['-DENABLE_PSK_SPEKE=ON'] if os.environ.get('HICAR_ENABLE_PSK_SPEKE') == '1' else []
+    # HICAR_ENABLE_WIRE_AUTH=1 emits Huawei AUTH_* codes / "2.0.31" version.
+    wire_options = ['-DENABLE_WIRE_AUTH=ON'] if os.environ.get('HICAR_ENABLE_WIRE_AUTH') == '1' else []
+    run([cmake, '-S', root / 'runtime', '-B', destination, *common, *psk_options, *wire_options,
+         '-DSOURCE_ROOT=' + str(root / 'sources'),
          '-DOPENSSL_INCLUDE_DIR=' + str(prefix / 'include'), '-DOPENSSL_CRYPTO_LIBRARY=' + str(prefix / 'lib/libcrypto.a'),
          '-DCJSON_INCLUDE=' + str(prefix / 'include/cjson'), '-DCJSON_LIB=' + str(prefix / 'lib/libcjson.a'),
          '-DMBEDCRYPTO_LIB=' + str(prefix / 'lib/libmbedcrypto.a')])

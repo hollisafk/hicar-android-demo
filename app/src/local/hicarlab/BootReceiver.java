@@ -8,8 +8,10 @@ public final class BootReceiver extends BroadcastReceiver {
         String problem=AutoStart.problem(context);
         if(problem!=null){DiagnosticLog.add(context,"开机自动接收未启动："+problem);return;}
         try{
-            context.startForegroundService(new Intent(context,ReceiverService.class).setAction("AUTO_START"));
+            startServiceCompat(context,new Intent(context,ReceiverService.class).setAction("AUTO_START"));
             DiagnosticLog.add(context,"收到开机完成通知，已请求自动接收；未请求后台弹出界面或开启麦克风。");
         }catch(RuntimeException e){DiagnosticLog.add(context,"系统未允许开机接收服务："+e.getClass().getSimpleName()+"；可手动打开应用连接。");}
     }
+    /** Android 8.0 前无 startForegroundService。 */
+    private static void startServiceCompat(Context c, Intent i){ if(android.os.Build.VERSION.SDK_INT>=26) c.startForegroundService(i); else c.startService(i); }
 }
